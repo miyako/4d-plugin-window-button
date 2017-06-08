@@ -1,0 +1,1 @@
+﻿{"name":"Window Button","id":20000,"commands":[{"theme":"Window Button","syntax":"WINDOW SET ENABLED(&L;&L;&L)"},{"theme":"Window Button","syntax":"WINDOW Get enabled(&L;&L):L"}]}
