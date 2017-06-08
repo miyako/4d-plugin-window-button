@@ -27,9 +27,8 @@ Parameter|Type|Description
 ------------|------|----
 window|LONGINT|The window reference
 kind|LONGINT|``Window Button Types``
----
 
-* Window Button Types
+### Window Button Types
 
 ```c
 Window close button 0
