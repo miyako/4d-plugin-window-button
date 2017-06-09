@@ -16,7 +16,7 @@ Related projects:
 * https://github.com/miyako/4d-plugin-window-icon
 * https://github.com/miyako/4d-plugin-carbon-window-manager
 
-### Syntax
+## Syntax
 
 ```
 WINDOW SET ENABLED (window;kind;enabled)
