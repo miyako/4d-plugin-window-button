@@ -29,12 +29,7 @@ void PluginMain(PA_long32 selector, PA_PluginParameters params)
 	}
 	catch(...)
 	{
-		// [FIX #1] Handle exception instead of silently swallowing it.
-		// Without this, the 4D host application hangs indefinitely waiting for a return value.
-		// Set an error return code to unblock the host.
-		C_LONGINT errorCode;
-		errorCode.setIntValue(-1);
-		errorCode.setReturn(pResult);
+
 	}
 }
 
