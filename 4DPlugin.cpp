@@ -6,6 +6,11 @@
  #	author : miyako
  #	2017/06/08
  #
+ #	FIXES APPLIED (v1.1):
+ #	  [FIX #1] Added error handling to exception catch block (was silent)
+ #	  [FIX #2a] Added null-pointer check to WINDOW_SET_ENABLED (32-bit path)
+ #	  [FIX #2b] Added null-pointer check to WINDOW_Get_enabled (32-bit path)
+ #
  # --------------------------------------------------------------------------------*/
 
 
@@ -24,7 +29,12 @@ void PluginMain(PA_long32 selector, PA_PluginParameters params)
 	}
 	catch(...)
 	{
-
+		// [FIX #1] Handle exception instead of silently swallowing it.
+		// Without this, the 4D host application hangs indefinitely waiting for a return value.
+		// Set an error return code to unblock the host.
+		C_LONGINT errorCode;
+		errorCode.setIntValue(-1);
+		errorCode.setReturn(pResult);
 	}
 }
 
@@ -142,8 +152,11 @@ void WINDOW_SET_ENABLED(sLONG_PTR *pResult, PackagePtr pParams)
 	}
 #else
 	WindowRef windowRef = PA_GetWindowRef(Param1.getIntValue());
-	switch (Param2.getIntValue())
+	// [FIX #2a] Add null-pointer check (prevents crash on invalid window ID)
+	if (windowRef)
 	{
+		switch (Param2.getIntValue())
+		{
   case Window_minimize_button:
 			setButton(windowRef, kHIWindowBitCollapseBox, Param3.getIntValue());
 			break;
@@ -156,6 +169,7 @@ void WINDOW_SET_ENABLED(sLONG_PTR *pResult, PackagePtr pParams)
   default:
 			SetWindowModified(windowRef, Param3.getIntValue());
 			break;
+		}
 	}
 #endif
 	
@@ -192,8 +206,11 @@ void WINDOW_Get_enabled(sLONG_PTR *pResult, PackagePtr pParams)
 	}
 #else
 	WindowRef windowRef = PA_GetWindowRef(Param1.getIntValue());
-	switch (Param2.getIntValue())
+	// [FIX #2b] Add null-pointer check (prevents crash on invalid window ID)
+	if (windowRef)
 	{
+		switch (Param2.getIntValue())
+		{
   case Window_minimize_button:
 			returnValue.setIntValue(getButton(windowRef, kHIWindowBitCollapseBox));
 			break;
@@ -206,9 +223,14 @@ void WINDOW_Get_enabled(sLONG_PTR *pResult, PackagePtr pParams)
   default:
 			returnValue.setIntValue(IsWindowModified(windowRef));
 			break;
+		}
+	}
+	else
+	{
+		// Return 0 (false) for invalid window ID as safe default
+		returnValue.setIntValue(0);
 	}
 #endif
 
 	returnValue.setReturn(pResult);
 }
-
