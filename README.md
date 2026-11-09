@@ -5,6 +5,69 @@
 
 # 4d-plugin-window-button
 
+## Maintainer release workflow
+
+**Bump version** and **Build** are separate manual Actions operations. Select the
+intended branch in the Actions branch selector; publication is not restricted to
+the default branch. Bump version accepts patch, minor or major, checks out the
+immutable dispatch SHA, and commits only marketing/display source metadata.
+It neither tags nor dispatches Build. A clean checkout, an unchanged remote branch, a
+single-parent direct-child commit, and an executable advertised-SHA pre-push
+guard are required. The guard checks exactly one update, including the remote's
+advertised old SHA, so late advance, rewind, deletion and same-result races fail.
+Push is non-force with automatic tag following disabled.
+
+Run **Build** separately on the intended branch after reviewing its source
+version. Build has zero inputs and checks out only the selected `github.sha`.
+Three `MARKETING_VERSION` settings must agree on one strict `X.Y.Z`, as must
+both localized English display overrides and any existing plist short version.
+The three `CURRENT_PROJECT_VERSION` settings and `CFBundleVersion` are separately
+validated build metadata, not release authority, and are never rewritten by
+Bump. Numeric build versions with one to three components and supported
+references are preserved; an absent `CFBundleShortVersionString` is not added.
+The original workflow header explicitly selected `MARKETING_VERSION`, and all
+four historical bumps updated marketing alone while current stayed `1.1.0`.
+There is no documented coordination contract. Accordingly the migration retains
+marketing authority `1.1.4`, current/build `1.1.0` and the plist build reference,
+repairing only localized display `1.1.0` values to `1.1.4`, without a release
+increment. If a plist display reference points to an independent numeric current
+value, Bump stops before editing rather than rewriting that reference or build
+metadata. Copyright, line endings, modes, prebuilt bundles, 4D data/schema,
+localization counters and dependencies are not version-bump targets.
+
+The existing macOS universal build, Developer ID signing/verification, ZIP/DMG
+packaging, both notarization submissions and DMG stapling remain required.
+There is no Windows build job; committed legacy Windows payload and bundle
+resources remain packaged unchanged. To prevent publishing a stale committed
+macOS binary, Build removes only the old `Contents/MacOS` and `Plugins/Default`
+outputs, sets the build output to the packaged Plugins directory, and requires
+both arm64 and x86_64. Xcode signing behavior and the explicit Developer ID
+signing and strict verification steps are retained. Deployment target,
+frameworks, project configuration and signing/notary secret names are unchanged.
+
+A repository-wide, cross-branch publication concurrency group queues builds
+without cancellation. Before native work, and again after all signing,
+notarization and stapling gates, Build checks the remote tag and authenticated,
+validated release pages (including drafts). API/authentication/network errors,
+malformed responses and errors on later pages stop publication. It then uses a
+create-only tag POST at the exact selected SHA and verifies the remote ref,
+followed by a separate public, non-prerelease release POST with the original
+empty notes. Only that new release ID receives
+`Window Button-X.Y.Z.zip` and `Window Button-X.Y.Z.dmg`.
+
+**Recovery:** existing tags or draft/published releases are never reused,
+updated, deleted or overwritten. A failed operation is not retried or rolled
+back: a tag, release or subset of uploaded assets may remain. Inspect the Actions
+error, exact selected SHA and retained remote state before taking a separate,
+explicit maintenance decision. Do not rerun expecting automatic cleanup or
+asset replacement. Use Bump version for a new source version when appropriate;
+an existing version cannot be republished by Build.
+
+Local checks (no native build, signing, notarization or 4D execution):
+`actionlint` and `python3 -B -m unittest discover -s .github/tests -v`.
+The suites exercise disposable bare Git remotes, mocked authenticated API
+responses, byte-preserving metadata updates, exclusions and workflow wiring.
+
 The Window Button plugin lets you enable or disable the standard macOS window control buttons (close, minimize, zoom) and query or set the document-modified indicator on any open 4D window. This is useful for locking down the window interface during critical operations, or providing visual feedback that a document has unsaved changes.
 
 | Command | Returns | Purpose |
