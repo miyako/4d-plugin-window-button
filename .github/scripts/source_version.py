@@ -1,4 +1,4 @@
-"""Coordinated MARKETING_VERSION and CURRENT_PROJECT_VERSION source metadata.
+"""Marketing-first source versions with independently validated build metadata.
 
 Only source metadata is authoritative; prebuilt bundles and 4D counters are excluded.
 """
@@ -15,6 +15,7 @@ PLIST = Path("Info.plist")
 LOCALIZED = Path("English.lproj/InfoPlist.strings")
 SOURCE_PATHS = (PROJECT, PLIST, LOCALIZED)
 VERSION = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+BUILD_VERSION = r"[0-9]+(?:\.[0-9]+){0,2}"
 KEYS = ("MARKETING_VERSION", "CURRENT_PROJECT_VERSION")
 SETTING_COUNT = 3
 SETTING = re.compile(
@@ -70,20 +71,24 @@ def read(root=Path(".")):
     fields = {key: [] for key in KEYS}
     project = text(root / PROJECT)
     for key in KEYS:
-        if len(re.findall(rf"(?m)^[ \t]*{key}\b", project)) != SETTING_COUNT:
+        if len(re.findall(rf'(?m)^[ \t]*(?:{key}\b|"{key}")', project)) != SETTING_COUNT:
             raise ValueError(f"Expected three source assignments for {key}")
     for match in SETTING.finditer(project):
         fields[match[2]].append(unquote(match[3].strip()))
     if any(len(fields[key]) != SETTING_COUNT for key in KEYS):
-        raise ValueError("Expected three source settings for each coordinated version key")
+        raise ValueError("Expected three source settings for each version key")
     marketing = set(fields["MARKETING_VERSION"])
     if len(marketing) != 1 or not re.fullmatch(VERSION, next(iter(marketing))):
         raise ValueError("MARKETING_VERSION must be one strict X.Y.Z across configurations")
     version = next(iter(marketing))
-    for value in fields["CURRENT_PROJECT_VERSION"]:
-        if value != version and REFERENCES.get(value) != "MARKETING_VERSION":
-            raise ValueError("CURRENT_PROJECT_VERSION is invalid, cyclic or has drifted")
-    resolved = {key: version for key in KEYS}
+    current = set(fields["CURRENT_PROJECT_VERSION"])
+    if len(current) != 1:
+        raise ValueError("Independent CURRENT_PROJECT_VERSION settings have drifted")
+    build = next(iter(current))
+    if not re.fullmatch(BUILD_VERSION, build) and REFERENCES.get(build) != "MARKETING_VERSION":
+        raise ValueError("CURRENT_PROJECT_VERSION is invalid or cyclic")
+    resolved = {"MARKETING_VERSION": version,
+                "CURRENT_PROJECT_VERSION": version if build in REFERENCES else build}
     try:
         plist = plistlib.loads((root / PLIST).read_bytes(), dict_type=UniqueDictionary)
     except (plistlib.InvalidFileException, ExpatError, UnicodeError) as exc:
@@ -98,7 +103,11 @@ def read(root=Path(".")):
         if key == "CFBundleShortVersionString" and key not in plist:
             continue
         value = plist.get(key)
-        if not isinstance(value, str) or resolved.get(REFERENCES.get(value), value) != version:
+        if not isinstance(value, str):
+            raise ValueError(f"{key} must be a string")
+        actual = resolved.get(REFERENCES.get(value), value)
+        if (key == "CFBundleShortVersionString" and actual != version) or (
+                key == "CFBundleVersion" and not re.fullmatch(BUILD_VERSION, actual)):
             raise ValueError(f"{key} is missing, invalid, unresolved or has drifted")
         literal = [m[2] for m in serialized if f"<key>{key}</key>" in m[1]]
         if literal != [value]:
@@ -117,6 +126,13 @@ def read(root=Path(".")):
 def bump(mode, root=Path(".")):
     root = Path(root)
     current = read(root)
+    plist = plistlib.loads((root / PLIST).read_bytes())
+    if REFERENCES.get(plist.get("CFBundleShortVersionString")) == "CURRENT_PROJECT_VERSION":
+        if any(match[2] == "CURRENT_PROJECT_VERSION"
+               and unquote(match[3].strip()) not in REFERENCES
+               for match in SETTING.finditer(text(root / PROJECT))):
+            raise ValueError("Short version references an independent build value; "
+                             "cannot bump display metadata while preserving that reference")
     index = ("major", "minor", "patch").index(mode)
     parts = list(map(int, current.split(".")))
     parts[index] += 1
@@ -124,9 +140,9 @@ def bump(mode, root=Path(".")):
     new = ".".join(map(str, parts))
 
     def replace(match):
-        literal = match[3].strip()
-        if unquote(literal) in REFERENCES:
+        if match[2] != "MARKETING_VERSION":
             return match[0]
+        literal = match[3].strip()
         replacement = f'"{new}"' if literal.startswith('"') else new
         value = match[3].replace(literal, replacement, 1)
         return f"{match[1]}{value}{match[4]}"
@@ -139,7 +155,9 @@ def bump(mode, root=Path(".")):
     transforms = (
         (PROJECT, lambda value: SETTING.sub(replace, value)),
         (PLIST, lambda value: PLIST_VERSION.sub(
-            lambda m: m[0] if m[2] in REFERENCES else f"{m[1]}{new}{m[3]}", value,
+            lambda m: f"{m[1]}{new}{m[3]}"
+            if "<key>CFBundleShortVersionString</key>" in m[1] and m[2] not in REFERENCES
+            else m[0], value,
         )),
         (LOCALIZED, localized),
     )

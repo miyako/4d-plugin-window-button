@@ -1,4 +1,5 @@
-# Source metadata only. Build is a separate manual operation.
+# Marketing/display source metadata only; independent build metadata is preserved.
+# Build is a separate manual operation.
 name: Bump version
 
 on:

@@ -10,8 +10,8 @@
 **Bump version** and **Build** are separate manual Actions operations. Select the
 intended branch in the Actions branch selector; publication is not restricted to
 the default branch. Bump version accepts patch, minor or major, checks out the
-immutable dispatch SHA, and commits only coordinated source metadata. It neither
-tags nor dispatches Build. A clean checkout, an unchanged remote branch, a
+immutable dispatch SHA, and commits only marketing/display source metadata.
+It neither tags nor dispatches Build. A clean checkout, an unchanged remote branch, a
 single-parent direct-child commit, and an executable advertised-SHA pre-push
 guard are required. The guard checks exactly one update, including the remote's
 advertised old SHA, so late advance, rewind, deletion and same-result races fail.
@@ -19,14 +19,21 @@ Push is non-force with automatic tag following disabled.
 
 Run **Build** separately on the intended branch after reviewing its source
 version. Build has zero inputs and checks out only the selected `github.sha`.
-Three `MARKETING_VERSION` and three `CURRENT_PROJECT_VERSION` settings must
-resolve to one strict `X.Y.Z`; the root `Info.plist` version and both localized
-English version overrides must agree. References are preserved, and an absent
-`CFBundleShortVersionString` key is not added. The migration retains the existing
-`1.1.4` release authority, repairing only stale `CURRENT_PROJECT_VERSION` and
-localized `1.1.0` values to `1.1.4`, without a release increment. Copyright,
-line endings, modes, prebuilt bundles, 4D data/schema, localization counters and
-dependencies are not version-bump targets.
+Three `MARKETING_VERSION` settings must agree on one strict `X.Y.Z`, as must
+both localized English display overrides and any existing plist short version.
+The three `CURRENT_PROJECT_VERSION` settings and `CFBundleVersion` are separately
+validated build metadata, not release authority, and are never rewritten by
+Bump. Numeric build versions with one to three components and supported
+references are preserved; an absent `CFBundleShortVersionString` is not added.
+The original workflow header explicitly selected `MARKETING_VERSION`, and all
+four historical bumps updated marketing alone while current stayed `1.1.0`.
+There is no documented coordination contract. Accordingly the migration retains
+marketing authority `1.1.4`, current/build `1.1.0` and the plist build reference,
+repairing only localized display `1.1.0` values to `1.1.4`, without a release
+increment. If a plist display reference points to an independent numeric current
+value, Bump stops before editing rather than rewriting that reference or build
+metadata. Copyright, line endings, modes, prebuilt bundles, 4D data/schema,
+localization counters and dependencies are not version-bump targets.
 
 The existing macOS universal build, Developer ID signing/verification, ZIP/DMG
 packaging, both notarization submissions and DMG stapling remain required.

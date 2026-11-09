@@ -63,6 +63,21 @@ class SourceTests(unittest.TestCase):
         data.update(values)
         path.write_bytes(plistlib.dumps(data))
 
+    def project_value(self, key):
+        return next(source.unquote(match[3].strip()) for match in
+                    source.SETTING.finditer(source.text(self.root / source.PROJECT))
+                    if match[2] == key)
+
+    def expected_bytes(self, path, before, new):
+        old, new = self.current.encode(), new.encode()
+        if path == source.PROJECT:
+            return b"".join(line.replace(old, new) if b"MARKETING_VERSION" in
+                            line.split(b"=", 1)[0] else line
+                            for line in before.splitlines(keepends=True))
+        if path == source.PLIST:
+            return before
+        return before.replace(old, new)
+
     def test_live_metadata_and_all_bump_modes(self):
         self.assertEqual(source.SETTING_COUNT, 3)
         self.assertEqual(tuple(map(str, source.SOURCE_PATHS)), (
@@ -80,6 +95,7 @@ class SourceTests(unittest.TestCase):
         ):
             with self.subTest(mode=mode):
                 copy_source(self.root)
+                project_before = (self.root / source.PROJECT).read_bytes()
                 expected = ".".join(map(str, expected))
                 self.assertEqual(source.bump(mode, self.root), expected)
                 self.assertEqual(source.read(self.root), expected)
@@ -88,23 +104,27 @@ class SourceTests(unittest.TestCase):
                 self.assertEqual(data["CFBundleVersion"], "$(CURRENT_PROJECT_VERSION)")
                 self.assertEqual((self.root / source.LOCALIZED).read_bytes(),
                                  original_localized.replace(self.current.encode(), expected.encode()))
-                for key in source.KEYS:
-                    self.assertEqual((self.root / source.PROJECT).read_text().count(
-                        f"{key} = {expected};"), source.SETTING_COUNT)
+                self.assertEqual((self.root / source.PROJECT).read_bytes(),
+                                 self.expected_bytes(source.PROJECT, project_before, expected))
+                self.assertEqual((self.root / source.PROJECT).read_text().count(
+                    f"MARKETING_VERSION = {expected};"), source.SETTING_COUNT)
 
     def test_invalid_missing_and_drifted_project_settings(self):
         path = self.root / source.PROJECT
         original = path.read_text()
+        build = self.project_value("CURRENT_PROJECT_VERSION")
         for key in source.KEYS:
+            old = self.project_value(key)
             for bad in ("1.2", "v1.2.3", "01.2.3", "1.2.3-beta", "$(UNKNOWN)", "", self.drifted):
                 with self.subTest(key=key, bad=bad):
-                    path.write_text(original.replace(f"{key} = {self.current};",
+                    path.write_text(original.replace(f"{key} = {old};",
                                                      f"{key} = {bad};", 1))
                     with self.assertRaises(ValueError):
                         source.bump("patch", self.root)
-            path.write_text(original.replace(f"{key} = {self.current};", "", 1))
+            path.write_text(original.replace(f"{key} = {old};", "", 1))
             with self.assertRaises(ValueError):
                 source.read(self.root)
+            path.write_text(original)
         for bad in ("v2.0.0", "2.0.0-beta", "$(UNKNOWN)", "", "$(CURRENT_PROJECT_VERSION)"):
             path.write_text(source.SETTING.sub(
                 lambda m: f"{m[1]}{bad}{m[4]}" if m[2] == "CURRENT_PROJECT_VERSION" else m[0],
@@ -112,14 +132,16 @@ class SourceTests(unittest.TestCase):
             ))
             with self.subTest(build=bad), self.assertRaises(ValueError):
                 source.read(self.root)
-        path.write_text(original.replace(f"CURRENT_PROJECT_VERSION = {self.current};", "", 1))
+        path.write_text(original.replace(f"CURRENT_PROJECT_VERSION = {build};", "", 1))
         with self.assertRaises(ValueError):
             source.read(self.root)
 
     def test_plist_invalid_drift_and_missing(self):
         for key in ("CFBundleShortVersionString", "CFBundleVersion"):
             invalid = ("$(UNKNOWN)", "$(PRODUCT_NAME)", "", "invalid", 123,
-                       "1.2", "14.3", "7", self.drifted)
+                       "1.2.3.4", "v1.2.3", "1.2.3-beta")
+            if key == "CFBundleShortVersionString":
+                invalid += ("1.2", "14.3", "7", self.drifted)
             for value in invalid:
                 with self.subTest(key=key, value=value):
                     copy_source(self.root)
@@ -145,9 +167,9 @@ class SourceTests(unittest.TestCase):
         new = source.bump("minor", self.root)
         data = plistlib.loads(path.read_bytes())
         self.assertEqual(data["CFBundleShortVersionString"], new)
-        self.assertEqual(data["CFBundleVersion"], new)
+        self.assertEqual(data["CFBundleVersion"], self.current)
 
-    def test_valid_refs_preserved_and_literal_bundle_version_co_bumped(self):
+    def test_valid_refs_preserved_and_literal_bundle_version_unchanged(self):
         for reference in source.REFERENCES:
             with self.subTest(reference=reference):
                 copy_source(self.root)
@@ -166,7 +188,8 @@ class SourceTests(unittest.TestCase):
         copy_source(self.root)
         self.plist(CFBundleVersion=self.current)
         new = source.bump("minor", self.root)
-        self.assertEqual(plistlib.loads((self.root / source.PLIST).read_bytes())["CFBundleVersion"], new)
+        self.assertEqual(plistlib.loads((self.root / source.PLIST).read_bytes())["CFBundleVersion"],
+                         self.current)
 
     def test_cyclic_current_project_ref_rejected(self):
         path = self.root / source.PROJECT
@@ -177,7 +200,7 @@ class SourceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             source.read(self.root)
 
-    def test_stable_fixture_coordinated_contract(self):
+    def test_stable_fixture_independent_current_and_build_contract(self):
         self.assertEqual(source.SETTING_COUNT, 3)
         project = self.root / source.PROJECT
         project.write_text(
@@ -192,26 +215,48 @@ class SourceTests(unittest.TestCase):
         )
         self.assertEqual(source.read(self.root), "3.2.1")
         self.assertEqual(source.bump("minor", self.root), "3.3.0")
-        self.assertEqual(project.read_text().count("CURRENT_PROJECT_VERSION = 3.3.0;"), source.SETTING_COUNT)
-        self.assertEqual(plistlib.loads((self.root / source.PLIST).read_bytes())["CFBundleVersion"], "3.3.0")
+        self.assertEqual(project.read_text().count("CURRENT_PROJECT_VERSION = 3.2.1;"), source.SETTING_COUNT)
+        self.assertEqual(plistlib.loads((self.root / source.PLIST).read_bytes())["CFBundleVersion"], "3.2.1")
         self.plist(CFBundleShortVersionString="$(CURRENT_PROJECT_VERSION)")
-        self.assertEqual(source.read(self.root), "3.3.0")
-        project.write_text(project.read_text().replace("CURRENT_PROJECT_VERSION = 3.3.0;",
-                                                      "CURRENT_PROJECT_VERSION = 14.3;"))
         with self.assertRaises(ValueError):
             source.read(self.root)
+        self.plist(CFBundleShortVersionString="$(MARKETING_VERSION)")
+        project.write_text(project.read_text().replace("CURRENT_PROJECT_VERSION = 3.2.1;",
+                                                      "CURRENT_PROJECT_VERSION = 14.3;"))
+        self.assertEqual(source.read(self.root), "3.3.0")
 
     def test_current_drift_rejected(self):
         path = self.root / source.PROJECT
         original = path.read_text()
-        for old in (self.drifted, "14.3", "77"):
-            for count in (1, source.SETTING_COUNT):
+        current_build = self.project_value("CURRENT_PROJECT_VERSION")
+        for old in (current_build + "0", "14.3" if current_build != "14.3" else "15.3",
+                    "77" if current_build != "77" else "78"):
+            for count in (1, 2):
                 with self.subTest(old=old, count=count):
                     path.write_text(original.replace(
-                        f"CURRENT_PROJECT_VERSION = {self.current};",
+                        f"CURRENT_PROJECT_VERSION = {current_build};",
                         f"CURRENT_PROJECT_VERSION = {old};", count))
                     with self.assertRaises(ValueError):
                         source.read(self.root)
+
+    def test_numeric_independent_current_and_literal_bundle_build_preserved(self):
+        for build in ("7", "14.3", self.current):
+            with self.subTest(build=build):
+                copy_source(self.root)
+                path = self.root / source.PROJECT
+                path.write_text(source.SETTING.sub(
+                    lambda match: f"{match[1]}{build}{match[4]}"
+                    if match[2] == "CURRENT_PROJECT_VERSION" else match[0],
+                    source.text(path)))
+                self.plist(CFBundleVersion=self.current)
+                original_plist = (self.root / source.PLIST).read_bytes()
+                original_project = path.read_bytes()
+                new = source.bump("patch", self.root)
+                self.assertEqual(source.read(self.root), new)
+                self.assertEqual(path.read_bytes(),
+                                 self.expected_bytes(source.PROJECT, original_project, new))
+                self.assertEqual(self.project_value("CURRENT_PROJECT_VERSION"), build)
+                self.assertEqual((self.root / source.PLIST).read_bytes(), original_plist)
 
     def test_prebuilt_schema_and_localization_counters_ignored(self):
         excluded = (
@@ -278,19 +323,22 @@ class SourceTests(unittest.TestCase):
                     new = source.bump("minor", self.root)
                     for path in source.SOURCE_PATHS:
                         before = originals[path]
-                        expected = before.replace(self.current.encode(), new.encode())
+                        expected = self.expected_bytes(path, before, new)
                         self.assertEqual((self.root / path).read_bytes(), expected)
                         self.assertEqual((self.root / path).stat().st_mode & 0o777, 0o755)
 
-    def test_quoted_coordinated_settings_and_wrong_plist_root(self):
+    def test_quoted_independent_settings_and_wrong_plist_root(self):
         path = self.root / source.PROJECT
         value = path.read_text()
+        build = self.project_value("CURRENT_PROJECT_VERSION")
         for key in source.KEYS:
-            value = value.replace(f"{key} = {self.current};", f'{key} = "{self.current}";')
+            old = self.project_value(key)
+            value = value.replace(f"{key} = {old};", f'{key} = "{old}";')
         path.write_text(value)
         new = source.bump("patch", self.root)
         for key in source.KEYS:
-            self.assertEqual(path.read_text().count(f'{key} = "{new}";'), source.SETTING_COUNT)
+            expected = new if key == "MARKETING_VERSION" else build
+            self.assertEqual(path.read_text().count(f'{key} = "{expected}";'), source.SETTING_COUNT)
         (self.root / source.PLIST).write_bytes(plistlib.dumps([]))
         with self.assertRaisesRegex(ValueError, "dictionary"):
             source.read(self.root)
@@ -304,11 +352,13 @@ class SourceTests(unittest.TestCase):
             value = b'"' + old + b'"' if quoted else old
             before = original
             for key in source.KEYS:
-                before = before.replace(key.encode() + b" = " + old + b";",
+                original_value = self.project_value(key).encode()
+                value = b'"' + original_value + b'"' if quoted else original_value
+                before = before.replace(key.encode() + b" = " + original_value + b";",
                                         key.encode() + b" = \t" + value + b" \t;")
             path.write_bytes(before)
             new = source.bump("patch", self.root)
-            self.assertEqual(path.read_bytes(), before.replace(old, new.encode()))
+            self.assertEqual(path.read_bytes(), self.expected_bytes(source.PROJECT, before, new))
         path.write_bytes(original + b"\nMARKETING_VERSION = " + self.current.encode() + b";\n")
         with self.assertRaises(ValueError):
             source.read(self.root)
