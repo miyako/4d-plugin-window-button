@@ -5,6 +5,19 @@
 
 # 4d-plugin-window-button
 
+## Native ownership regression
+
+The compiled legacy picture/pointer helpers now balance command arguments,
+successful return values and retained picture references, and convert UTF-16
+byte counts to code units. Raw-owning wrappers prohibit shallow copies. Neither
+public window command uses these dormant helpers.
+
+Run `PYTHONDONTWRITEBYTECODE=1 python3 .github/tests/test_ownership.py` on macOS
+for unsigned, synthetic ASan/UBSan coverage of the complete bundled SDK, all
+wrappers and the actual modern/legacy Mac dispatchers. No real windows, input,
+files or images are accessed. See [the audit](.github/tests/ownership-audit.md)
+for immutable baseline evidence, exact contracts and deferred SDK limitations.
+
 ## Maintainer release workflow
 
 **Bump version** and **Build** are separate manual Actions operations. Select the
